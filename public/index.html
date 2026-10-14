@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Olive Table · Booking Assistant</title>
+  <style>
+    :root {
+      --bg: #f7f5f0; --panel: #ffffff; --text: #1f2421; --muted: #6b716c;
+      --accent: #4a6b3a; --guest: #e7efe1; --border: #e2ded4; --code: #f1eee6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161816; --panel: #1f221f; --text: #e8eae6; --muted: #9aa198;
+        --accent: #9cc285; --guest: #2b3627; --border: #333833; --code: #262a26;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; max-width: 1100px; margin: 0 auto; padding: 16px; height: 100dvh; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; height: auto; } }
+    section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; }
+    header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    h1 { font-size: 17px; margin: 0; } h2 { font-size: 14px; margin: 0; }
+    header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 320px; }
+    .msg { max-width: 80%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; }
+    .guest { align-self: flex-end; background: var(--guest); }
+    .assistant { align-self: flex-start; border: 1px solid var(--border); }
+    .error { color: #b3261e; }
+    form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
+    input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; }
+    button { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--panel); font: inherit; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
+    .chips button { background: transparent; color: var(--accent); border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
+    aside { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+    pre { margin: 0; padding: 12px 16px; overflow: auto; font-size: 12px; background: var(--code); border-radius: 0 0 12px 12px; flex: 1; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <header>
+      <h1>The Olive Table</h1>
+      <p>Booking assistant demo · LangGraph + OpenRouter</p>
+    </header>
+    <div id="log" aria-live="polite"></div>
+    <div class="chips" id="examples"></div>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="e.g. A table for 4 tomorrow at 8pm" aria-label="Message">
+      <button id="send">Send</button>
+    </form>
+  </section>
+  <aside>
+    <section>
+      <header><h2>Under the hood</h2><p>Intent, collected details and the service outcome for the last turn</p></header>
+      <pre id="debug">Send a message to see the agent's state.</pre>
+    </section>
+    <section>
+      <header><h2>Reservation book</h2><p>What the agent actually wrote</p></header>
+      <pre id="book">No reservations yet.</pre>
+    </section>
+  </aside>
+</main>
+<script>
+  const log = document.getElementById('log');
+  const form = document.getElementById('form');
+  const input = document.getElementById('input');
+  const send = document.getElementById('send');
+  let threadId;
+
+  const examples = [
+    'Can I book a table for 2 this Saturday at 7:30pm?',
+    'Are you open on Mondays?',
+    'What times are free next Friday for 6 people?',
+    'I need to cancel my booking',
+  ];
+  for (const text of examples) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.textContent = text;
+    chip.onclick = () => { input.value = text; form.requestSubmit(); };
+    document.getElementById('examples').append(chip);
+  }
+
+  function add(role, text) {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.textContent = text;
+    log.append(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function refreshBook() {
+    const { reservations } = await (await fetch('/api/reservations')).json();
+    document.getElementById('book').textContent = reservations.length
+      ? reservations.map((r) => `${r.code}  ${r.status.padEnd(9)} ${r.date} ${r.time}  ${r.partySize}p  ${r.name}${r.notes ? `  (${r.notes})` : ''}`).join('\n')
+      : 'No reservations yet.';
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+    add('guest', message);
+    input.value = '';
+    send.disabled = true;
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message, threadId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      threadId = body.threadId;
+      add('assistant', body.reply);
+      document.getElementById('debug').textContent = JSON.stringify(body.debug, null, 2);
+      await refreshBook();
+    } catch (error) {
+      add('assistant error', error.message);
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  });
+</script>
+</body>
+</html>
