@@ -6,6 +6,8 @@ A conversational booking assistant for a (fictional) restaurant, The Olive Table
 
 Built with **LangGraph** (TypeScript), **OpenRouter** (free models by default) and **Fastify**, with a small web chat that shows the agent's state as it works.
 
+Illustrative exchange:
+
 ```
 Guest: Can I get a table on Friday at 7:30?
 Agent: Happy to help! How many people, and what name should I put the booking under?
