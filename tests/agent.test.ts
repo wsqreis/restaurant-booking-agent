@@ -103,4 +103,21 @@ describe('booking agent graph', () => {
     assert.equal(state.outcome?.action, 'check_availability');
     assert.equal((state.outcome?.data as { partySize: number }).partySize, 2);
   });
+
+  it('treats "None"-like strings from the model as missing, instead of booking under the name "None"', async () => {
+    const model = new ScriptedModel().say(
+      { intent: 'book', date: FRIDAY, time: '19:30', partySize: 2, name: 'None' },
+      { intent: 'other', name: 'Ana Silva' },
+    );
+    const { send, reservations } = agentWith(model);
+
+    const first = await send('Table for 2 on Friday at 7:30pm');
+    assert.deepEqual(first.missing, ['name']);
+    assert.equal(first.outcome, null);
+    assert.equal(reservations.list().length, 0);
+
+    const second = await send('Ana Silva');
+    assert.equal(second.outcome?.ok, true);
+    assert.deepEqual(reservations.list().map((r) => r.name), ['Ana Silva']);
+  });
 });

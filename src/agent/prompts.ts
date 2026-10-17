@@ -25,7 +25,7 @@ Details collected so far: ${JSON.stringify(current.details)}
 Rules:
 - intent is what the guest wants now: book a new table, cancel, reschedule an existing booking, check_availability, ask about the restaurant (restaurant_info), or other.
 - If the guest is only answering a question about the request in progress (e.g. "4 people", "at 8"), keep that request's intent.
-- Fill a field only if the guest stated it in the conversation; otherwise null. Never guess a name or a party size.
+- Fill a field only if the guest stated it in the conversation; otherwise use JSON null (not the string "None"). Never guess a name or a party size.
 - Resolve relative dates ("tomorrow", "next Friday", "this Saturday") against today's date into YYYY-MM-DD.
 - Times are 24h HH:MM: "8pm" -> "20:00", "half seven in the evening" -> "19:30", "noon" -> "12:00".
 - reservationCode: the 6-character code from an existing booking, uppercase.

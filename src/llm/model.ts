@@ -1,7 +1,8 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import type { AIMessage, BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 import type { z } from 'zod';
 import type { Config } from '../config.ts';
+import { lenient } from './lenient.ts';
 
 /**
  * The two things the agent needs from an LLM. Keeping it this small lets tests
@@ -35,8 +36,12 @@ export class OpenRouterModel implements ChatModel {
 
   async extract<T extends z.ZodObject>(schema: T, messages: BaseMessage[]): Promise<z.infer<T>> {
     // Function calling is supported by far more (free) models than native JSON schema output.
-    const structured = this.#chat.withStructuredOutput(schema, { method: 'functionCalling', name: 'extract' });
-    return (await structured.invoke(messages)) as z.infer<T>;
+    // includeRaw keeps the model's own arguments, so they can be repaired (see lenient) instead of rejected.
+    const structured = this.#chat.withStructuredOutput(schema, { method: 'functionCalling', name: 'extract', includeRaw: true });
+    const { raw } = await structured.invoke(messages);
+    const args = (raw as AIMessage).tool_calls?.[0]?.args;
+    if (!args) throw new Error('The model did not return structured output');
+    return schema.parse(lenient(schema, args)) as z.infer<T>;
   }
 
   async reply(messages: BaseMessage[]): Promise<string> {

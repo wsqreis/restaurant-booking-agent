@@ -2,6 +2,7 @@
 //
 //   npm run eval                                  # default model list from config
 //   npm run eval -- --models a/model:free,b/model  # compare several models
+//   npm run eval -- --only case-a,case-b           # a subset of cases
 //
 // The clock is frozen at Wednesday 14 Oct 2026, 11:00 London, so relative dates
 // ("tomorrow", "this Saturday") have one right answer. Replies are stubbed out:
@@ -33,7 +34,11 @@ if (!config.llm.apiKey) {
 }
 const flag = process.argv.indexOf('--models');
 const models = flag > -1 ? (process.argv[flag + 1] ?? '').split(',').filter(Boolean) : [config.llm.models.join(',')];
-const cases: Case[] = JSON.parse(await readFile(new URL('./cases.json', import.meta.url), 'utf8'));
+const allCases: Case[] = JSON.parse(await readFile(new URL('./cases.json', import.meta.url), 'utf8'));
+// --only id1,id2 re-runs a subset of cases
+const onlyFlag = process.argv.indexOf('--only');
+const only = onlyFlag > -1 ? new Set((process.argv[onlyFlag + 1] ?? '').split(',')) : null;
+const cases = only ? allCases.filter((c) => only.has(c.id)) : allCases;
 
 /** Real extraction, stubbed reply: the eval only scores understanding. */
 class UnderstandingOnly implements ChatModel {
@@ -59,8 +64,15 @@ async function runCase(model: ChatModel, testCase: Case) {
     await sleep(PAUSE_MS);
   }
   const started = performance.now();
-  const state = await agent.invoke({ messages: [new HumanMessage(testCase.message)] }, thread);
+  // Score what the understanding step produced: after a successful booking the final state is reset for the
+  // next request, so reading it would show empty details for exactly the cases the agent got right.
+  let understood: { turn: Intent | null; intent: Intent | null; details: BookingDetails } | undefined;
+  for await (const update of await agent.stream({ messages: [new HumanMessage(testCase.message)] }, { ...thread, streamMode: 'updates' })) {
+    if ('understand' in update) understood = update.understand as typeof understood;
+  }
   const latencyMs = performance.now() - started;
+  if (!understood) throw new Error('the understand step produced no output');
+  const state = understood;
 
   const checks: Record<string, { expected: unknown; actual: unknown }> = {
     turn: { expected: testCase.expect.turn, actual: state.turn },

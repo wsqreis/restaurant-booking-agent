@@ -2,6 +2,7 @@ import { AIMessage, SystemMessage } from '@langchain/core/messages';
 import { type BaseCheckpointSaver, END, START, StateGraph } from '@langchain/langgraph';
 import { z } from 'zod';
 import type { ReservationService } from '../domain/reservations.ts';
+import { isBlank } from '../llm/lenient.ts';
 import type { ChatModel } from '../llm/model.ts';
 import { replyPrompt, understandPrompt } from './prompts.ts';
 import {
@@ -43,7 +44,7 @@ export function buildAgent(model: ChatModel, reservations: ReservationService, c
     const carried = intent === inProgress ? state.details : EMPTY_DETAILS;
     const details = { ...carried };
     for (const [key, value] of Object.entries(fields) as Array<[keyof typeof details, never]>) {
-      if (value !== null && value !== undefined && value !== '') details[key] = value;
+      if (!isBlank(value)) details[key] = value;
     }
     if (details.reservationCode) details.reservationCode = details.reservationCode.toUpperCase();
 
