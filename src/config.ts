@@ -16,8 +16,8 @@ export type Config = {
 // Free OpenRouter models come and go; override with OPENROUTER_MODELS when these disappear.
 const DEFAULT_MODELS = [
   'nvidia/nemotron-3-super-120b-a12b:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
   'google/gemma-4-31b-it:free',
-  'thinkingmachines/inkling:free',
 ];
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
