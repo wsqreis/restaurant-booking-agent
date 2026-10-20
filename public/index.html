@@ -84,10 +84,18 @@
     document.getElementById('examples').append(chip);
   }
 
+  // Models often answer with **bold**: show it as bold, building nodes rather than HTML so nothing is injected.
+  const prose = (text) => text.split(/\*\*(.+?)\*\*/g).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const strong = document.createElement('strong');
+    strong.textContent = part;
+    return strong;
+  });
+
   function add(role, text) {
     const div = document.createElement('div');
     div.className = `msg ${role}`;
-    div.textContent = text;
+    div.append(...prose(text));
     log.append(div);
     log.scrollTop = log.scrollHeight;
   }
