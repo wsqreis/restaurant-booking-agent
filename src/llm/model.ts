@@ -13,39 +13,66 @@ export interface ChatModel {
   reply(messages: BaseMessage[]): Promise<string>;
 }
 
-/** OpenRouter through its OpenAI-compatible API, with a list of fallback models. */
+/**
+ * True when another model might succeed: the model or its provider is missing, overloaded, rate limited or down.
+ * Not for bad requests or bad keys, which would fail the same way on every model.
+ */
+export function isProviderFailure(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') return status === 404 || status === 408 || status === 429 || status >= 500;
+  const name = error instanceof Error ? error.name : '';
+  return /Timeout|Connection|Abort/i.test(name);
+}
+
+/** OpenRouter through its OpenAI-compatible API, trying the configured models in order. */
 export class OpenRouterModel implements ChatModel {
-  readonly #chat: ChatOpenAI;
+  readonly #chats: ChatOpenAI[];
 
   constructor(config: Config['llm']) {
-    const [primary, ...fallbacks] = config.models;
-    this.#chat = new ChatOpenAI({
-      model: primary,
-      apiKey: config.apiKey,
-      temperature: config.temperature,
-      timeout: config.timeoutMs,
-      maxRetries: 2,
-      configuration: {
-        baseURL: config.baseUrl,
-        defaultHeaders: { 'HTTP-Referer': config.appUrl, 'X-Title': config.appName },
-      },
-      // OpenRouter tries these in order when the primary model is down or rate limited.
-      modelKwargs: fallbacks.length ? { models: config.models } : {},
-    });
+    // One client per model, tried in order here rather than with OpenRouter's `models` routing:
+    // during a provider outage that answered 404, OpenRouter rarely moved on to the next model.
+    this.#chats = config.models.map(
+      (model) =>
+        new ChatOpenAI({
+          model,
+          apiKey: config.apiKey,
+          temperature: config.temperature,
+          timeout: config.timeoutMs,
+          maxRetries: 2,
+          configuration: {
+            baseURL: config.baseUrl,
+            defaultHeaders: { 'HTTP-Referer': config.appUrl, 'X-Title': config.appName },
+          },
+        }),
+    );
+  }
+
+  async #firstAvailable<R>(call: (chat: ChatOpenAI) => Promise<R>): Promise<R> {
+    let lastError: unknown;
+    for (const chat of this.#chats) {
+      try {
+        return await call(chat);
+      } catch (error) {
+        if (!isProviderFailure(error)) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   async extract<T extends z.ZodObject>(schema: T, messages: BaseMessage[]): Promise<z.infer<T>> {
     // Function calling is supported by far more (free) models than native JSON schema output.
     // includeRaw keeps the model's own arguments, so they can be repaired (see lenient) instead of rejected.
-    const structured = this.#chat.withStructuredOutput(schema, { method: 'functionCalling', name: 'extract', includeRaw: true });
-    const { raw } = await structured.invoke(messages);
+    const { raw } = await this.#firstAvailable((chat) =>
+      chat.withStructuredOutput(schema, { method: 'functionCalling', name: 'extract', includeRaw: true }).invoke(messages),
+    );
     const args = (raw as AIMessage).tool_calls?.[0]?.args;
     if (!args) throw new Error('The model did not return structured output');
     return schema.parse(lenient(schema, args)) as z.infer<T>;
   }
 
   async reply(messages: BaseMessage[]): Promise<string> {
-    const response = await this.#chat.invoke(messages);
+    const response = await this.#firstAvailable((chat) => chat.invoke(messages));
     return typeof response.content === 'string'
       ? response.content
       : response.content.map((part) => ('text' in part ? part.text : '')).join('');
